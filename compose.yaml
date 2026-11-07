@@ -15,6 +15,40 @@ services:
       interval: 5s
       timeout: 5s
       retries: 5
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+
+    container_name: vulntrack-backend
+
+    ports:
+      - "8080:8080"
+
+    environment:
+      SPRING_DATASOURCE_URL: jdbc:postgresql://db:5432/vulntrack
+      SPRING_DATASOURCE_USERNAME: vulntrack
+      DB_PASSWORD: ${DB_PASSWORD}
+
+    depends_on:
+      db:
+        condition: service_healthy
+
+    restart: unless-stopped
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+
+    container_name: vulntrack-frontend
+
+    ports:
+      - "8081:80"
+
+    depends_on:
+      - backend
+
+    restart: unless-stopped
 
 volumes:
   scan_history_data:

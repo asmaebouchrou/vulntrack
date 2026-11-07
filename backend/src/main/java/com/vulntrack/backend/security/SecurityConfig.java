@@ -16,7 +16,7 @@ public class SecurityConfig {
                         .requestMatchers(HttpMethod.GET, "/api/v1/health").permitAll()
                         .anyRequest().authenticated())
                 .formLogin(form -> form
-                        .defaultSuccessUrl("http://localhost:5173/", true)
+                        .defaultSuccessUrl("/", true)
                         .permitAll());
 
         return http.build();
