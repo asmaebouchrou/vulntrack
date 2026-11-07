@@ -1,5 +1,113 @@
 :root {
-  font-family: Arial, sans-serif;
+  font-family:
+    Inter,
+    -apple-system,
+    BlinkMacSystemFont,
+    "Segoe UI",
+    sans-serif;
+  color: #1e293b;
+  background: #f8fafc;
   font-synthesis: none;
   text-rendering: optimizeLegibility;
+  -webkit-font-smoothing: antialiased;
+  --surface: #ffffff;
+  --text: #1e293b;
+  --muted: #52647a;
+  --accent: #4f6d8a;
+  --accent-dark: #3b566f;
+  --border: #e2e8f0;
+  --soft: #f1f5f9;
+}
+* {
+  box-sizing: border-box;
+}
+body {
+  margin: 0;
+  min-width: 320px;
+}
+button,
+input {
+  font: inherit;
+}
+button,
+a,
+summary,
+label {
+  -webkit-tap-highlight-color: transparent;
+}
+button,
+a,
+input,
+summary {
+  touch-action: manipulation;
+}
+a {
+  color: var(--accent-dark);
+  text-underline-offset: 3px;
+}
+button {
+  cursor: pointer;
+}
+button:disabled {
+  cursor: not-allowed;
+}
+:focus-visible {
+  outline: 3px solid #4f6d8a;
+  outline-offset: 4px;
+}
+::selection {
+  background: #dae5ef;
+  color: #1e293b;
+}
+h1,
+h2,
+h3,
+h4,
+p {
+  margin: 0;
+}
+code {
+  font-family: "SFMono-Regular", Consolas, "Liberation Mono", monospace;
+  font-size: 0.9em;
+  overflow-wrap: anywhere;
+}
+.icon {
+  width: 20px;
+  height: 20px;
+  flex-shrink: 0;
+}
+.visually-hidden {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+  border: 0;
+}
+.skip-link {
+  position: fixed;
+  top: 10px;
+  left: 10px;
+  z-index: 20;
+  padding: 12px 18px;
+  color: var(--text);
+  background: white;
+  border: 1px solid var(--accent);
+  border-radius: 8px;
+  transform: translateY(-160%);
+}
+.skip-link:focus {
+  transform: translateY(0);
+}
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation: none !important;
+    transition: none !important;
+    scroll-behavior: auto !important;
+  }
 }
