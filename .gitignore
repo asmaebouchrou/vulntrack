@@ -1,0 +1,19 @@
+# Credenciales y variables privadas
+.env
+.env.*
+!.env.example
+
+# Java y Maven
+**/target/
+*.class
+
+# Node.js
+**/node_modules/
+**/dist/
+
+# Sistema operativo
+.DS_Store
+
+# Editores
+.idea/
+.vscode/
