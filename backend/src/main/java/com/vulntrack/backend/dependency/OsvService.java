@@ -7,12 +7,17 @@ import java.util.List;
 import java.util.Map;
 import org.springframework.stereotype.Service;
 import org.springframework.web.client.RestClient;
+import java.util.HashMap;
+import java.util.HashSet;
+import java.util.Set;
 
 @Service
 public class OsvService {
     private final RestClient client;
 
-    public OsvService() { this(defaultClient()); }
+    public OsvService() {
+        this(defaultClient());
+    }
 
     private static RestClient defaultClient() {
         var httpClient = java.net.http.HttpClient.newBuilder()
@@ -22,7 +27,9 @@ public class OsvService {
         return RestClient.builder().baseUrl("https://api.osv.dev").requestFactory(factory).build();
     }
 
-    OsvService(RestClient client) { this.client = client; }
+    OsvService(RestClient client) {
+        this.client = client;
+    }
 
     public List<DependencyResult> scan(List<DependencyInfo> dependencies) {
         try {
@@ -35,7 +42,8 @@ public class OsvService {
     private List<DependencyResult> query(List<DependencyInfo> dependencies) {
         var queries = dependencies.stream().filter(d -> d.hasResolvedVersion())
                 .map(d -> Map.of("package", Map.of("ecosystem", "Maven", "name", d.groupId() + ":" + d.artifactId()),
-                        "version", d.version())).toList();
+                        "version", d.version()))
+                .toList();
         List<?> results = List.of();
         if (!queries.isEmpty()) {
             Map<?, ?> response = client.post().uri("/v1/querybatch").body(Map.of("queries", queries))
@@ -46,7 +54,7 @@ public class OsvService {
             }
             results = list;
         }
-
+        Map<String, Map<String, Object>> detailsCache = new HashMap<>();
         List<DependencyResult> output = new ArrayList<>();
         int resultIndex = 0;
         for (DependencyInfo dependency : dependencies) {
@@ -70,14 +78,34 @@ public class OsvService {
                         || vulnerability.keySet().stream().anyMatch(key -> !(key instanceof String))) {
                     throw new IllegalStateException("Vulnerabilidad inválida");
                 }
-                vulnerabilities.add(stringKeyedMap(vulnerability));
+                Map<String, Object> details = detailsCache.computeIfAbsent(id, this::fetchVulnerabilityDetails);
+
+                vulnerabilities.add(details);
             }
             output.add(new DependencyResult(dependency.groupId(), dependency.artifactId(), dependency.version(),
                     vulnerabilities, AnalysisStatus.ANALYZED));
         }
         return output;
     }
+    private Map<String, Object> fetchVulnerabilityDetails(String id) {
 
+    Map<?, ?> response = client.get()
+            .uri("/v1/vulns/{id}", id)
+            .retrieve()
+            .body(Map.class);
+
+    if (response == null
+            || !id.equals(response.get("id"))
+            || response.keySet().stream()
+                    .anyMatch(key -> !(key instanceof String))) {
+
+        throw new IllegalStateException(
+                "Respuesta de detalle OSV inválida para: " + id
+        );
+    }
+
+    return stringKeyedMap(response);
+}
     @SuppressWarnings("unchecked")
     private Map<String, Object> stringKeyedMap(Map<?, ?> map) {
         return (Map<String, Object>) map;
