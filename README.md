@@ -66,9 +66,6 @@ Testing includes JUnit, Mockito, MockMvc and Spring Security Test.
 
 ![Vulnerability Analysis Results](docs/screenshots/vulnerability-results.png)
 
-### Scan History
-
-![Scan History](docs/screenshots/scan-history.png)
 
 ## Getting Started
 
