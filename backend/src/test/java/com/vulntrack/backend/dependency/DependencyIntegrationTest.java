@@ -1,7 +1,6 @@
-package com.vulntrack.backend.dependecy;
+package com.vulntrack.backend.dependency;
 
 import com.vulntrack.backend.PostgresTest;
-import com.vulntrack.backend.dependency.*;
 import com.vulntrack.backend.scan.ScanDtos.*;
 import com.vulntrack.backend.scan.ScanRepository;
 import java.util.List;
