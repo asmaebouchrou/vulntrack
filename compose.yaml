@@ -9,7 +9,7 @@ services:
     ports:
       - "127.0.0.1:5432:5432"
     volumes:
-      - postgres_data:/var/lib/postgresql/data
+      - scan_history_data:/var/lib/postgresql/data
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U vulntrack -d vulntrack"]
       interval: 5s
@@ -17,4 +17,4 @@ services:
       retries: 5
 
 volumes:
-  postgres_data:
+  scan_history_data:
