@@ -1,6 +1,7 @@
 package com.vulntrack.backend.dependency;
 
 import java.util.List;
+import com.vulntrack.backend.scan.ScanService;
 import java.util.Map;
 
 import org.springframework.http.ResponseEntity;
@@ -13,10 +14,12 @@ public class DependencyController {
 
     private final DependencyService dependencyService;
     private final OsvService osvService;
+    private final ScanService scanService;
 
-    public DependencyController(DependencyService dependencyService, OsvService osvService) {
+    public DependencyController(DependencyService dependencyService, OsvService osvService, ScanService scanService) {
         this.dependencyService = dependencyService;
         this.osvService = osvService;
+        this.scanService = scanService;
 
     }
 
@@ -40,7 +43,7 @@ public class DependencyController {
             var results = osvService.scan(dependencies);
 
             return ResponseEntity.ok(
-                    Map.of("results", results));
+                    scanService.save(file.getOriginalFilename(), dependencies, results));
 
         } catch (IllegalArgumentException e) {
             return ResponseEntity.badRequest()
