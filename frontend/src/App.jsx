@@ -1,299 +1,333 @@
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
+import {
+  Header,
+  UploadSection,
+  ScanHistory,
+  Icon,
+} from "./components/Workspace";
+import ScanResults from "./components/ScanResults";
 import "./App.css";
 
-function App() {
-  const [file, setFile] = useState(null);
-  const [backendStatus, setBackendStatus] = useState("Comprobando...");
+class SessionError extends Error {}
 
-  useEffect(() => {
-    async function checkBackend() {
-      try {
-        const response = await fetch("/api/v1/health");
-
-        if (!response.ok) {
-          throw new Error("El backend no responde correctamente");
-        }
-
-        setBackendStatus("Conectado");
-      } catch (error) {
-        setBackendStatus("Desconectado");
-      }
-    }
-
-    checkBackend();
-  }, []);
-  function handleFileChange(event) {
-    const selectedFile = event.target.files[0];
-    setFile(selectedFile);
+async function readJson(response, fallback) {
+  const contentType = response.headers.get("content-type") ?? "";
+  if (
+    response.status === 401 ||
+    (response.redirected && new URL(response.url).pathname === "/login")
+  ) {
+    throw new SessionError(
+      "Inicia sesión para continuar. Si ya habías iniciado sesión, puede haber caducado.",
+    );
   }
+  if (response.status === 403)
+    throw new Error(
+      "La petición no se ha autorizado. Vuelve a iniciar sesión e inténtalo de nuevo.",
+    );
+  if (!response.ok) {
+    const data = contentType.includes("json")
+      ? await response.json().catch(() => null)
+      : null;
+    throw new Error(data?.error || `${fallback} (HTTP ${response.status}).`);
+  }
+  if (!contentType.includes("json"))
+    throw new Error(
+      "El servidor no ha devuelto una respuesta válida. Vuelve a intentarlo.",
+    );
+  return response.json();
+}
+
+export default function App() {
+  const [file, setFile] = useState(null);
+  const [fileError, setFileError] = useState("");
+  const [backendStatus, setBackendStatus] = useState("checking");
+  const [authStatus, setAuthStatus] = useState("checking");
+  const [loggingOut, setLoggingOut] = useState(false);
+  const [authError, setAuthError] = useState("");
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
   const [scanResult, setScanResult] = useState(null);
+  const [metadata, setMetadata] = useState(null);
+  const [history, setHistory] = useState([]);
+  const [historyError, setHistoryError] = useState("");
+  const [historyLoading, setHistoryLoading] = useState(true);
+  const [openingId, setOpeningId] = useState(null);
+  const resultsHeading = useRef(null);
+  const operationInProgress = useRef(false);
+  const busy = loading || openingId !== null || loggingOut;
 
-  async function handleAnalyze() {
-    if (!file) return;
+  useEffect(() => {
+    const controller = new AbortController();
+    async function checkBackend() {
+      try {
+        const response = await fetch("/api/v1/health", {
+          signal: controller.signal,
+        });
+        setBackendStatus(response.ok ? "connected" : "disconnected");
+      } catch (exception) {
+        if (exception.name !== "AbortError") setBackendStatus("disconnected");
+      }
+    }
+    checkBackend();
+    return () => controller.abort();
+  }, []);
 
-    if (file.name !== "pom.xml") {
-      setError("Selecciona un archivo llamado pom.xml");
+  const loadHistory = useCallback((signal) => {
+    return fetch("/api/v1/scans", { credentials: "same-origin", signal })
+      .then((response) => readJson(response, "No se pudo cargar el historial"))
+      .then((data) => {
+        if (!Array.isArray(data))
+          throw new Error("No se pudo interpretar el historial del servidor.");
+        setHistory(data);
+        setHistoryError("");
+        setAuthStatus("authenticated");
+      })
+      .catch((exception) => {
+        if (exception.name === "AbortError") return;
+        setHistoryError(
+          exception instanceof SessionError
+            ? ""
+            : "No se pudo cargar el historial. Comprueba la conexión.",
+        );
+        if (exception instanceof SessionError) {
+          setAuthStatus("anonymous");
+          setHistory([]);
+        } else
+          setAuthStatus((current) =>
+            current === "checking" ? "unknown" : current,
+          );
+      })
+      .finally(() => {
+        if (!signal?.aborted) setHistoryLoading(false);
+      });
+  }, []);
+
+  useEffect(() => {
+    const controller = new AbortController();
+    loadHistory(controller.signal);
+    return () => controller.abort();
+  }, [loadHistory]);
+
+  function handleFile(files) {
+    if (!files.length) return;
+    if (files.length !== 1) {
+      setFile(null);
+      setFileError("Selecciona un único archivo pom.xml.");
       return;
     }
+    const selected = files[0];
+    setFile(selected);
+    setFileError(
+      selected.name !== "pom.xml"
+        ? "El archivo debe llamarse pom.xml."
+        : selected.size === 0
+          ? "El archivo está vacío. Selecciona un pom.xml con contenido."
+          : "",
+    );
+    setError("");
+  }
 
+  function focusResults() {
+    requestAnimationFrame(() => {
+      resultsHeading.current?.focus({ preventScroll: true });
+      resultsHeading.current?.scrollIntoView({
+        block: "start",
+        behavior: "instant",
+      });
+    });
+  }
+
+  async function handleAnalyze() {
+    if (
+      !file ||
+      fileError ||
+      operationInProgress.current ||
+      authStatus !== "authenticated"
+    )
+      return;
+    operationInProgress.current = true;
     setLoading(true);
     setError("");
     setScanResult(null);
-
     try {
-      // 1. Obtener el token CSRF de la sesión actual
-      const csrfResponse = await fetch("/api/v1/auth/csrf");
-
-      if (!csrfResponse.ok) {
-        throw new Error("No se pudo obtener el token CSRF. Inicia sesión.");
-      }
-
-      const csrf = await csrfResponse.json();
-
-      // 2. Preparar el archivo para enviarlo
+      const csrf = await readJson(
+        await fetch("/api/v1/auth/csrf", { credentials: "same-origin" }),
+        "No se pudo obtener el token de seguridad",
+      );
       const formData = new FormData();
       formData.append("file", file);
-
-      // 3. Enviar el archivo al backend
       const response = await fetch("/api/v1/dependencies/upload", {
         method: "POST",
-        headers: {
-          [csrf.headerName]: csrf.token,
-        },
+        credentials: "same-origin",
+        headers: { [csrf.headerName]: csrf.token },
         body: formData,
       });
-
-      if (!response.ok) {
-        if (response.status === 401 || response.status === 403) {
-          throw new Error("La sesión no es válida o la petición fue rechazada.");
-        }
-
-        throw new Error(`Error al analizar el archivo (HTTP ${response.status}).`);
-      }
-
-      const data = await response.json();
+      const data = await readJson(response, "No se pudo analizar el archivo");
       setScanResult(data);
+      setMetadata({ filename: file.name });
+      setAuthStatus("authenticated");
+      setHistoryLoading(true);
       await loadHistory();
-    } catch (err) {
-      setError(err.message || "Ha ocurrido un error inesperado.");
+    } catch (exception) {
+      setError(
+        exception.message ||
+          "No se pudo completar el análisis. Inténtalo de nuevo.",
+      );
+      if (exception instanceof SessionError) {
+        setAuthStatus("anonymous");
+        setHistory([]);
+      }
     } finally {
       setLoading(false);
-    }
-
-  }
-  const [history, setHistory] = useState([]);
-  const [historyError, setHistoryError] = useState("");
-  async function loadHistory() {
-    try {
-      const response = await fetch("/api/v1/scans");
-
-      if (!response.ok) {
-        throw new Error(`Error HTTP ${response.status}`);
-      }
-
-      const data = await response.json();
-
-      setHistory(data);
-      setHistoryError("");
-    } catch (error) {
-      setHistoryError("No se pudo cargar el historial");
+      operationInProgress.current = false;
+      focusResults();
     }
   }
-  useEffect(() => {
-    loadHistory();
-  }, []);
+
   async function viewScan(scanId) {
+    if (operationInProgress.current) return;
+    operationInProgress.current = true;
+    setOpeningId(scanId);
     setError("");
     setScanResult(null);
-
     try {
-      const response = await fetch(`/api/v1/scans/${scanId}`);
-
-      if (!response.ok) {
-        throw new Error("No se pudo recuperar el análisis");
+      const data = await readJson(
+        await fetch(`/api/v1/scans/${scanId}`, { credentials: "same-origin" }),
+        "No se pudo recuperar el análisis",
+      );
+      setScanResult({ scanId: data.id, results: data.dependencies });
+      setMetadata({ filename: data.filename, createdAt: data.createdAt });
+      setAuthStatus("authenticated");
+    } catch (exception) {
+      setError(exception.message || "No se pudo recuperar el análisis.");
+      if (exception instanceof SessionError) {
+        setAuthStatus("anonymous");
+        setHistory([]);
       }
-
-      const data = await response.json();
-
-      setScanResult({
-        scanId: data.id,
-        results: data.dependencies,
-      });
-    } catch (err) {
-      setError(err.message);
+    } finally {
+      setOpeningId(null);
+      operationInProgress.current = false;
+      focusResults();
     }
   }
-  function getSeverity(vulnerability) {
-    const severity = vulnerability.database_specific?.severity;
 
-    const translations = {
-      CRITICAL: "Crítica",
-      HIGH: "Alta",
-      MODERATE: "Moderada",
-      MEDIUM: "Media",
-      LOW: "Baja",
-    };
-
-    return translations[severity] ?? "No disponible";
+  async function handleLogout() {
+    if (operationInProgress.current) return;
+    operationInProgress.current = true;
+    setLoggingOut(true);
+    setAuthError("");
+    try {
+      const csrf = await readJson(
+        await fetch("/api/v1/auth/csrf", { credentials: "same-origin" }),
+        "No se pudo preparar el cierre de sesión",
+      );
+      const response = await fetch("/logout", {
+        method: "POST",
+        credentials: "same-origin",
+        headers: { [csrf.headerName]: csrf.token },
+      });
+      if (!response.ok)
+        throw new Error("No se pudo cerrar la sesión. Inténtalo de nuevo.");
+      setAuthStatus("anonymous");
+      setHistory([]);
+      setHistoryError("");
+      setScanResult(null);
+      setError("");
+    } catch (exception) {
+      if (exception instanceof SessionError) {
+        setAuthStatus("anonymous");
+        setHistory([]);
+        setScanResult(null);
+      } else setAuthError(exception.message || "No se pudo cerrar la sesión.");
+    } finally {
+      setLoggingOut(false);
+      operationInProgress.current = false;
+    }
   }
-  function getFixedVersions(vulnerability, dependency) {
-    const packageName = `${dependency.groupId}:${dependency.artifactId}`;
 
-    const versions = (vulnerability.affected ?? [])
-      .filter((affected) => affected.package?.name === packageName)
-      .flatMap((affected) => affected.ranges ?? [])
-      .filter((range) => range.type === "ECOSYSTEM")
-      .flatMap((range) => range.events ?? [])
-      .map((event) => event.fixed)
-      .filter(Boolean);
-
-    return [...new Set(versions)];
+  function refreshHistory() {
+    if (busy || historyLoading) return;
+    setHistoryLoading(true);
+    loadHistory();
   }
+
   return (
-    <div className="app">
-      <header className="header">
-        <h1>VulnTrack</h1>
-        <p>Analizador de vulnerabilidades en dependencias Maven</p>
-        <p>Estado del backend: {backendStatus}</p>
-        <a href="/login" className="login-button">
-          Iniciar sesión
-        </a>
-      </header>
-
-      <main>
-        <section className="card">
-          <h2>Nuevo análisis</h2>
-          <p>Selecciona un archivo pom.xml para analizar sus dependencias.</p>
-
-          <input
-            type="file"
-            accept=".xml"
-            onChange={handleFileChange}
-          />
-
+    <>
+      <a className="skip-link" href="#contenido">
+        Saltar al contenido
+      </a>
+      <Header
+        backendStatus={backendStatus}
+        authStatus={authStatus}
+        loggingOut={loggingOut}
+        busy={busy}
+        onLogout={handleLogout}
+        authError={authError}
+      />
+      <main className="app" id="contenido">
+        <div className="page-heading">
+          <div>
+            <p className="eyebrow">REVISIÓN DE SEGURIDAD</p>
+            <h1>Análisis de dependencias</h1>
+            <p>
+              Identifica vulnerabilidades conocidas y consulta el historial de
+              tus proyectos.
+            </p>
+          </div>
+        </div>
+        <nav className="section-nav" aria-label="Secciones del análisis">
+          <a href="#nuevo-analisis">
+            <Icon name="upload" />
+            Nuevo análisis
+          </a>
+          <a href="#resultados">
+            <Icon name="layers" />
+            Resultados
+          </a>
+          <a href="#historial">
+            <Icon name="clock" />
+            Historial
+          </a>
+        </nav>
+        <UploadSection
+          file={file}
+          fileError={fileError}
+          onFile={handleFile}
+          loading={loading}
+          busy={busy}
+          authStatus={authStatus}
+          onAnalyze={handleAnalyze}
+        />
+        <ScanResults
+          result={scanResult}
+          metadata={metadata}
+          loading={loading}
+          openingId={openingId}
+          error={error}
+          headingRef={resultsHeading}
+        />
+        <ScanHistory
+          history={history}
+          loading={historyLoading}
+          error={historyError}
+          authStatus={authStatus}
+          onReload={refreshHistory}
+          onView={viewScan}
+          openingId={openingId}
+          busy={busy}
+          selectedId={scanResult?.scanId}
+        />
+        <footer className="site-footer">
+          <span>
+            <Icon name="shield" />
+            VulnTrack
+          </span>
           <p>
-            Archivo seleccionado: {file ? file.name : "Ninguno"}
+            Análisis de dependencias Maven · Información de vulnerabilidades de
+            OSV
           </p>
-
-          <button
-            onClick={handleAnalyze}
-            disabled={!file || loading}
-          >
-            {loading ? "Analizando..." : "Analizar dependencias"}
-          </button>
-        </section>
-
-        <section className="card">
-          <h2>Resultados</h2>
-
-          {error && <p role="alert" style={{ color: "crimson" }}>{error}</p>}
-
-          {!scanResult && !error && (
-            <p>Aquí aparecerán las vulnerabilidades encontradas.</p>
-          )}
-
-          {scanResult && (
-            <>
-              <p>Análisis guardado con ID: {scanResult.scanId}</p>
-
-              {(scanResult.results ?? []).length === 0 ? (
-                <p>No hay resultados de vulnerabilidades para mostrar.</p>
-              ) : (
-                (scanResult.results ?? []).map((dependency, index) => (
-                  <div className="dependency-result" key={index}>
-                    <h3>
-                      {dependency.groupId}:{dependency.artifactId}
-                    </h3>
-
-                    <p>Versión: {dependency.version ?? "No especificada"}</p>
-
-                    <p>
-                      Vulnerabilidades conocidas:{" "}
-                      {dependency.vulnerabilities?.length ?? 0}
-                    </p>
-
-                    {(dependency.vulnerabilities ?? []).map((vulnerability, i) => (
-                      <div className="vulnerability-card" key={vulnerability.id ?? i}>
-
-                        <h4>{vulnerability.id}</h4>
-                        <p>
-                          <strong>CVE: </strong>
-                          {vulnerability.aliases?.find((alias) =>
-                            alias.startsWith("CVE-")
-                          ) ?? "No disponible"}
-                        </p>
-                        <p>
-                          <strong>Descripción: </strong>
-                          {vulnerability.summary ||
-                            vulnerability.details ||
-                            "Descripción no disponible"}
-                        </p>
-
-                        <p>
-                          <strong>Gravedad: </strong>
-                          {getSeverity(vulnerability)}
-                        </p>
-                        <p>
-                          <strong>Versiones de corrección indicadas por OSV: </strong>
-                          {getFixedVersions(vulnerability, dependency).join(", ") ||
-                            "No disponibles"}
-                        </p>
-                        {vulnerability.references?.length > 0 && (
-                          <a
-                            href={vulnerability.references[0].url}
-                            target="_blank"
-                            rel="noopener noreferrer"
-                          >
-                            Consultar aviso de seguridad
-                          </a>
-                        )}
-
-                      </div>
-                    ))}
-                  </div>
-                ))
-              )}
-            </>
-          )}
-        </section>
-
-        <section className="card">
-          <h2>Historial de análisis</h2>
-
-          {historyError && <p role="alert">{historyError}</p>}
-
-          {history.length === 0 && !historyError ? (
-            <p>Todavía no hay análisis guardados.</p>
-          ) : (
-            history.map((scan) => (
-              <div className="dependency-result" key={scan.id}>
-                <h3>{scan.filename}</h3>
-
-                <p>ID: {scan.id}</p>
-
-                <p>
-                  Fecha: {new Date(scan.createdAt).toLocaleString("es-ES")}
-                </p>
-
-                <p>Dependencias: {scan.dependencyCount}</p>
-
-                <p>
-                  Dependencias vulnerables: {scan.vulnerableDependencyCount}
-                </p>
-                <button onClick={() => viewScan(scan.id)}>
-                  Ver análisis
-                </button>
-              </div>
-            ))
-          )}
-        </section>
+        </footer>
       </main>
-    </div>
+    </>
   );
-
-
 }
-
-export default App;

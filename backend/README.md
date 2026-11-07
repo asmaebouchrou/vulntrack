@@ -1,53 +1,188 @@
-# Backend de VulnTrack
+# VulnTrack
 
-Requiere Java 21 o superior, Maven y Docker. Con `DB_PASSWORD` configurada para la base local:
+**A full-stack vulnerability scanner for Maven dependencies.**
 
-```sh
-# Desde la raíz del repositorio
-docker compose up -d
-# Desde backend, exportando DB_PASSWORD en esta terminal
-mvn spring-boot:run
+VulnTrack is a cybersecurity application that analyzes Java project dependencies, detects known vulnerabilities using the **OSV API**, and presents the results through a clean, easy-to-use web interface.
+
+It also stores scan results in PostgreSQL, allowing users to review previous analyses.
+
+## Technologies & Tools
+
+**Backend**
+
+![Java](https://img.shields.io/badge/Java_21-ED8B00?style=flat-square&logo=openjdk&logoColor=white)
+![Spring Boot](https://img.shields.io/badge/Spring_Boot-6DB33F?style=flat-square&logo=springboot&logoColor=white)
+![Spring Security](https://img.shields.io/badge/Spring_Security-6DB33F?style=flat-square&logo=springsecurity&logoColor=white)
+![Hibernate](https://img.shields.io/badge/Hibernate-59666C?style=flat-square&logo=hibernate&logoColor=white)
+![Maven](https://img.shields.io/badge/Maven-C71A36?style=flat-square&logo=apachemaven&logoColor=white)
+![Flyway](https://img.shields.io/badge/Flyway-CC0200?style=flat-square&logo=flyway&logoColor=white)
+
+Spring MVC, Spring Data JPA, Jackson and REST APIs are used for request handling, persistence and data processing.
+
+**Frontend**
+
+![React](https://img.shields.io/badge/React-20232A?style=flat-square&logo=react&logoColor=61DAFB)
+![JavaScript](https://img.shields.io/badge/JavaScript-F7DF1E?style=flat-square&logo=javascript&logoColor=black)
+![Vite](https://img.shields.io/badge/Vite-646CFF?style=flat-square&logo=vite&logoColor=white)
+![HTML5](https://img.shields.io/badge/HTML5-E34F26?style=flat-square&logo=html5&logoColor=white)
+![CSS3](https://img.shields.io/badge/CSS3-1572B6?style=flat-square&logo=css&logoColor=white)
+
+**Database, Infrastructure & DevOps**
+
+![PostgreSQL](https://img.shields.io/badge/PostgreSQL_17-4169E1?style=flat-square&logo=postgresql&logoColor=white)
+![Docker](https://img.shields.io/badge/Docker-2496ED?style=flat-square&logo=docker&logoColor=white)
+![Nginx](https://img.shields.io/badge/Nginx-009639?style=flat-square&logo=nginx&logoColor=white)
+![Git](https://img.shields.io/badge/Git-F05032?style=flat-square&logo=git&logoColor=white)
+![GitHub](https://img.shields.io/badge/GitHub-181717?style=flat-square&logo=github&logoColor=white)
+![GitHub Actions](https://img.shields.io/badge/GitHub_Actions-2088FF?style=flat-square&logo=githubactions&logoColor=white)
+
+Docker Compose manages the application services. GitHub Actions automates backend tests and frontend build checks.
+
+**Testing & Vulnerability Intelligence**
+
+![JUnit 5](https://img.shields.io/badge/JUnit_5-25A162?style=flat-square&logo=junit5&logoColor=white)
+![Mockito](https://img.shields.io/badge/Mockito-Testing-5B8C5A?style=flat-square)
+![OSV](https://img.shields.io/badge/OSV_API-Vulnerability_Data-405F89?style=flat-square)
+
+Testing includes JUnit, Mockito, MockMvc and Spring Security Test.
+
+## Features
+
+- Upload Maven `pom.xml` files.
+- Extract project dependencies automatically.
+- Detect known vulnerabilities through the OSV API.
+- View CVE and GHSA identifiers, descriptions and severity information.
+- Display available fixed versions and security advisory links.
+- Save and retrieve scan history.
+- Protect API endpoints with Spring Security and CSRF protection.
+- Run the full application with Docker Compose.
+
+## Screenshots
+
+### Dashboard
+
+![VulnTrack Dashboard](docs/screenshots/dashboard.png)
+
+### Vulnerability Analysis
+
+![Vulnerability Analysis Results](docs/screenshots/vulnerability-results.png)
+
+
+### Requirements
+
+Install **Docker Desktop** with Docker Compose support and make sure Docker is running.
+
+### 1. Clone the repository
+
+```bash
+git clone https://github.com/asmaebouchrou/vulntrack.git
+cd vulntrack
 ```
 
-Flyway aplica V1 y V2; Hibernate valida el esquema (`ddl-auto=validate`). V1 se conserva sin cambios. V2 incorpora el estado de análisis de cada dependencia y un índice de la clave foránea.
+### 2. Configure environment variables
 
-## API
+Create a `.env` file in the project root:
 
-| Método y ruta | Respuesta |
-| --- | --- |
-| `GET /api/v1/health` | Salud pública |
-| `POST /api/v1/dependencies/upload` | Multipart `file=pom.xml`; `scanId` y `results` |
-| `GET /api/v1/scans` | Lista con `id`, `filename`, `createdAt`, `dependencyCount`, `vulnerableDependencyCount`, de más reciente a más antigua |
-| `GET /api/v1/scans/{id}` | `id`, `filename`, `createdAt` y `dependencies`; 404 si no existe |
+```env
+DB_PASSWORD=your_strong_local_password
+```
 
-Los tres endpoints de análisis requieren una sesión autenticada. Se conserva el formulario de Spring Security y CSRF: la subida requiere un token CSRF válido. El historial es una demostración local compartida entre todos los usuarios autenticados; no existe aislamiento por propietario.
+Replace the example value with your own password.
 
-Cada dependencia devuelve `groupId`, `artifactId`, `version`, `vulnerabilities` (array JSON) y `status`. Los estados son `ANALYZED` y `SKIPPED_UNRESOLVED_VERSION`. Las versiones ausentes, vacías o con propiedades Maven sin resolver se conservan, con su versión original y un array vacío; ese array no indica que se hayan analizado sin encontrar vulnerabilidades.
+If you already have a PostgreSQL volume, use its existing database credentials. Changing `.env` does not automatically change the password stored in an initialized database.
 
-Errores: 400 para archivo vacío, nombre distinto de `pom.xml` o XML/POM inválido; 413 para exceso de tamaño; 502 si OSV falla o devuelve resultados incompletos, inválidos o paginados; 503 para fallos de acceso/persistencia. Los errores no incluyen trazas ni detalles de la base de datos.
+### 3. Start VulnTrack
 
-## Persistencia
+Run:
 
-`scans` contiene el archivo y la fecha local del análisis (`TIMESTAMP`, sin zona). `scan_dependencies` contiene las coordenadas Maven, la versión opcional, el estado y las vulnerabilidades JSONB. `Scan` usa `OneToMany` con carga diferida, cascada y eliminación de huérfanos; `ScanDependency` mantiene la clave foránea mediante `ManyToOne` diferido. `addDependency` enlaza ambos lados.
+```bash
+docker compose up -d --build
+```
 
-OSV termina antes de abrir la transacción de escritura. `ScanService` valida que haya un resultado coherente por dependencia y guarda todo con `saveAndFlush` en una transacción: un fallo revierte el padre y sus dependencias. La conversión a DTO ocurre dentro de la transacción. El historial calcula los contadores en una sola consulta agregada, sin cargar vulnerabilidades; el detalle utiliza una consulta con `join fetch`.
+Docker Compose starts the application services:
 
-Las vulnerabilidades se representan mediante `List<Map<String, Object>>` y `@JdbcTypeCode(SqlTypes.JSON)`: Hibernate serializa la lista directamente, sin convertirla previamente en un string JSON. La integración lo comprueba mediante `jsonb_typeof`, acceso SQL al ID y recuperación por JPA.
+| Service | Description | Local address |
+|---|---|---|
+| Frontend | React + Nginx | http://localhost:8081 |
+| Backend | Spring Boot REST API | http://localhost:8080 |
+| Database | PostgreSQL | Port 5432 |
 
-## Pruebas
+### 4. Open the application
 
-```sh
+Visit:
+
+**http://localhost:8081**
+
+Sign in using the development credentials configured for Spring Security. If the application uses Spring Boot's generated development password, check the backend startup logs:
+
+```bash
+docker compose logs backend
+```
+
+### 5. Analyze dependencies
+
+1. Select a Maven `pom.xml` file.
+2. Click **Analizar dependencias**.
+3. Review detected vulnerabilities and security advisories.
+4. Open the scan history to revisit previous results.
+
+A sample Maven file is available at `test-files/pom.xml`.
+
+### Useful Docker commands
+
+Check running services:
+
+```bash
+docker compose ps
+```
+
+View logs:
+
+```bash
+docker compose logs -f backend
+```
+
+Stop the application:
+
+```bash
+docker compose down
+```
+
+The configured PostgreSQL volume remains available for subsequent runs.
+
+## Testing & Continuous Integration
+
+Backend tests:
+
+```bash
+cd backend
 mvn clean verify
 ```
 
-Requieren Docker disponible. Testcontainers arranca un PostgreSQL 17 aislado, sin usar la base de Compose ni `DB_PASSWORD`. Se prueban Flyway desde cero y la actualización de V1 con datos existentes, validación JPA, JSONB, rollback, orden del historial, ausencia de N+1, endpoints, 404, autenticación, CSRF, XML inválido/XXE y errores OSV. OSV se simula con Mockito en las pruebas HTTP y con `MockRestServiceServer` en las del cliente; ninguna prueba consulta OSV real.
+Frontend build:
 
-La integración externa con OSV, la resolución de propiedades/versiones heredadas Maven y el aislamiento multiusuario quedan fuera de esta implementación. Si OSV pagina resultados, la petición falla explícitamente sin guardar un análisis parcial.
+```bash
+cd frontend
+npm ci
+npm run build
+```
 
-## Base PostgreSQL de esta reconstrucción
+**GitHub Actions** runs automated checks to verify backend tests and frontend compilation during the repository's CI workflow.
 
-Compose utiliza el volumen `vulntrack_scan_history_data`, creado vacío para esta aplicación. Mantiene la base `vulntrack`, el usuario `vulntrack`, la variable `DB_PASSWORD` y el puerto local 5432.
+## What This Project Demonstrates
 
-El volumen anterior `vulntrack_postgres_data` pertenece al proyecto antiguo: contenía `projects` y una V1 denominada `create projects table`. Se conserva intacto junto con los demás volúmenes anteriores. La reconstrucción inicia su propio historial Flyway con `V1__create_scans_tables.sql` y aplica después V2. No se ha ejecutado `repair` ni modificado manualmente `flyway_schema_history`.
+VulnTrack brings together several important software engineering and cybersecurity skills:
 
-Verificación realizada: `mvn clean verify` supera 18 pruebas; Spring Boot arranca contra esta base local y Hibernate valida el esquema. Flyway registra V1 y V2 con éxito. Se comprobaron por HTTP salud pública (200), historial autenticado vacío (200), redirección sin sesión (302), análisis inexistente (404) y rechazo de POST sin CSRF (403). La compilación usa `release 21`; el entorno de Maven disponible ejecuta JDK 27.
+- Building REST APIs with Java and Spring Boot.
+- Integrating an external vulnerability intelligence service.
+- Implementing authentication and CSRF protection.
+- Working with relational databases and database migrations.
+- Developing a functional React interface.
+- Writing automated tests and configuring continuous integration.
+- Packaging and running a full-stack application with Docker.
+
+The result is a working end-to-end application that connects **frontend, backend, vulnerability intelligence and persistent storage** in a single project.
+
+---
+
+**VulnTrack — Full-stack development meets cybersecurity.**◊
